@@ -11,7 +11,11 @@ if (typeof _fetch !== "function") {
 
 const app = express();
 app.use(cors({
-  origin: ["http://localhost:5173"], // fejlesztéshez Vite
+  origin: [
+    "https://voidbot.hu",
+    "https://www.voidbot.hu",
+    "http://localhost:5173"
+  ],
   credentials: false
 }));
 app.use(express.json());
