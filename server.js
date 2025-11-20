@@ -1,23 +1,20 @@
+
 // server.js
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 
-// ---- Safe fetch minden Node-hoz ----
-let _fetch = global.fetch;
-if (typeof _fetch !== "function") {
-  _fetch = (...args) => import("node-fetch").then(m => m.default(...args));
-}
-
 const app = express();
+
 app.use(cors({
   origin: [
-    "https://voidbot.hu",
-    "https://www.voidbot.hu",
-    "http://localhost:5173"
+    "http://localhost:5173",       // fejlesztés
+    "https://voidbot.hu",          // ha www nélkül is lesz
+    "https://www.voidbot.hu"       // EZ KELL most
   ],
   credentials: false
 }));
+
 app.use(express.json());
 
 /* ============================================================
