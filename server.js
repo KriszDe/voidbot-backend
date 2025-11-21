@@ -1,4 +1,3 @@
-
 // server.js
 require("dotenv").config();
 const express = require("express");
@@ -6,32 +5,20 @@ const cors = require("cors");
 
 const app = express();
 
-const allowedOrigins = [
-  "http://localhost:5173",
-  "https://voidbot.hu",
-  "https://www.voidbot.hu",
-];
-
-app.use(cors({
-  origin: function (origin, callback) {
-    // pl. Postman / SSR esetén origin null lehet
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error("Not allowed by CORS: " + origin));
-    }
-  },
-  credentials: false, // nálad nem használsz cookie-t, ez maradhat
-}));
-
-// ha biztonság kedvéért szeretnél OPTIONS válaszokat is:
+/* ============================================================
+   CORS – minden origin engedélyezése
+   ============================================================ */
+// Mivel NINCS cookie / credentials használva, ez teljesen biztonságos
+app.use(cors());
 app.options("*", cors());
+
+app.use(express.json());
 
 /* ============================================================
    In-memory DEV store (MVP-hez). Prod: adatbázis!
    ============================================================ */
-const deviceCodes = new Map(); // code -> { userId, discord_access_token, exp, used }
-const sessions    = new Map(); // session_token -> { userId, discord_access_token, exp, device_name }
+const deviceCodes = new Map(); 
+const sessions = new Map();
 
 /* ============================================================
    Helpers
@@ -39,7 +26,7 @@ const sessions    = new Map(); // session_token -> { userId, discord_access_toke
 function genDeviceCode(len = 12) {
   const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
   const raw = Array.from({ length: len }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("");
-  return `${raw.slice(0,4)}-${raw.slice(4,8)}-${raw.slice(8)}`; // XXXX-XXXX-XXXX
+  return `${raw.slice(0,4)}-${raw.slice(4,8)}-${raw.slice(8)}`;
 }
 
 function genSessionToken() {
@@ -50,8 +37,8 @@ function resolveDiscordTokenFromAuthHeader(authorization) {
   const tok = (authorization || "").startsWith("Bearer ") ? authorization.slice(7) : "";
   if (!tok) return null;
   const sess = sessions.get(tok);
-  if (sess && sess.exp > Date.now()) return sess.discord_access_token; // session token -> discord token
-  return tok; // lehet közvetlen Discord token is
+  if (sess && sess.exp > Date.now()) return sess.discord_access_token;
+  return tok;
 }
 
 /* ============================================================
@@ -62,9 +49,7 @@ app.get("/api/health", (_req, res) => {
 });
 
 /* ============================================================
-   OAuth token csere + user lekérés (frontend bejelentkezés)
-   Body: { code, redirect_uri? }
-   Vissza: { user, oauth, access_token }
+   OAuth token csere + user lekérés
    ============================================================ */
 app.post("/api/auth/discord", async (req, res) => {
   try {
@@ -112,7 +97,7 @@ app.post("/api/auth/discord", async (req, res) => {
         email: user.email,
       },
       oauth: { scope: tokenData.scope, token_type: tokenData.token_type },
-      access_token: tokenData.access_token, // FRONTEND: tárold pl. fivemhub_token-ként
+      access_token: tokenData.access_token,
     });
   } catch (e) {
     console.error("SERVER ERROR (/api/auth/discord):", e);
@@ -123,17 +108,12 @@ app.post("/api/auth/discord", async (req, res) => {
 /* ============================================================
    Device pairing
    ============================================================ */
-
-// Web: párosító kód igénylés
-// Header: Authorization: Bearer <Discord access token>
-// Vissza: { device_code, expires_at }
 app.post("/api/device/start", async (req, res) => {
   try {
     const auth = req.headers.authorization || "";
     const discordToken = auth.startsWith("Bearer ") ? auth.slice(7) : "";
     if (!discordToken) return res.status(401).json({ error: "missing_bearer_token" });
 
-    // Token valid + user
     const meR = await _fetch("https://discord.com/api/users/@me", {
       headers: { Authorization: `Bearer ${discordToken}` },
     });
@@ -142,7 +122,8 @@ app.post("/api/device/start", async (req, res) => {
     const me = JSON.parse(meTxt);
 
     const code = genDeviceCode(12);
-    const exp  = Date.now() + 10 * 60 * 1000; // 10 perc
+    const exp = Date.now() + 10 * 60 * 1000;
+
     deviceCodes.set(code, { userId: me.id, discord_access_token: discordToken, exp, used: false });
 
     return res.json({ device_code: code, expires_at: exp });
@@ -152,9 +133,6 @@ app.post("/api/device/start", async (req, res) => {
   }
 });
 
-// Windows: kód beváltás → session token + user
-// Body: { device_code, device_name? }
-// Vissza: { session_token, user, expires_at }
 app.post("/api/device/claim", async (req, res) => {
   try {
     const { device_code, device_name } = req.body || {};
@@ -165,7 +143,6 @@ app.post("/api/device/claim", async (req, res) => {
     if (row.used) return res.status(400).json({ error: "already_used" });
     if (row.exp < Date.now()) return res.status(400).json({ error: "expired" });
 
-    // lekérjük a usert, hogy azonnal visszaadhassuk a desktopnak
     const meR = await _fetch("https://discord.com/api/users/@me", {
       headers: { Authorization: `Bearer ${row.discord_access_token}` },
     });
@@ -173,10 +150,10 @@ app.post("/api/device/claim", async (req, res) => {
     if (!meR.ok) return res.status(401).json({ error: "discord_unauthorized", details: meTxt });
     const me = JSON.parse(meTxt);
 
-    // session létrehozás
     row.used = true;
     const session_token = genSessionToken();
-    const exp = Date.now() + 30 * 24 * 60 * 60 * 1000; // 30 nap
+    const exp = Date.now() + 30 * 24 * 60 * 60 * 1000;
+
     sessions.set(session_token, {
       userId: row.userId,
       discord_access_token: row.discord_access_token,
@@ -202,10 +179,8 @@ app.post("/api/device/claim", async (req, res) => {
 });
 
 /* ============================================================
-   Védett proxyk (session token VAGY közvetlen Discord token)
+   Protected Discord proxy endpoints
    ============================================================ */
-
-// Ki vagyok?  Header: Authorization: Bearer <session_token | discord_access_token>
 app.get("/api/me", async (req, res) => {
   try {
     const discordToken = resolveDiscordTokenFromAuthHeader(req.headers.authorization);
@@ -225,7 +200,6 @@ app.get("/api/me", async (req, res) => {
   }
 });
 
-// /users/@me/guilds – a kliens oldalon szűrheted owner=true-re
 app.get("/api/discord/guilds", async (req, res) => {
   try {
     const discordToken = resolveDiscordTokenFromAuthHeader(req.headers.authorization);
@@ -246,22 +220,16 @@ app.get("/api/discord/guilds", async (req, res) => {
 });
 
 /* ============================================================
-   Lejárt session/device takarítás (óránként)
+   Cleanup
    ============================================================ */
 setInterval(() => {
   const now = Date.now();
-  for (const [k, v] of sessions.entries()) {
-    if (v.exp <= now) sessions.delete(k);
-  }
-  for (const [k, v] of deviceCodes.entries()) {
-    if (v.exp <= now || v.used) deviceCodes.delete(k);
-  }
+  for (const [k, v] of sessions.entries()) if (v.exp <= now) sessions.delete(k);
+  for (const [k, v] of deviceCodes.entries()) if (v.exp <= now || v.used) deviceCodes.delete(k);
 }, 60 * 60 * 1000);
 
 /* ============================================================
    Start
    ============================================================ */
 const port = process.env.PORT || 3000;
-// Tipp: ha másik gépről is el akarod érni LAN-on, használd az alábbit:
-// app.listen(port, "0.0.0.0", () => console.log(`Backend on http://localhost:${port}`));
-app.listen(port, () => console.log(`Backend running on http://localhost:${port}`));
+app.listen(port, () => console.log(`Backend running on port ${port}`));
