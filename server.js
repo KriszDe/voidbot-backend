@@ -6,16 +6,26 @@ const cors = require("cors");
 
 const app = express();
 
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://voidbot.hu",
+  "https://www.voidbot.hu",
+];
+
 app.use(cors({
-  origin: [
-    "http://localhost:5173",       // fejlesztés
-    "https://voidbot.hu",          // ha www nélkül is lesz
-    "https://www.voidbot.hu"       // EZ KELL most
-  ],
-  credentials: false
+  origin: function (origin, callback) {
+    // pl. Postman / SSR esetén origin null lehet
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS: " + origin));
+    }
+  },
+  credentials: false, // nálad nem használsz cookie-t, ez maradhat
 }));
 
-app.use(express.json());
+// ha biztonság kedvéért szeretnél OPTIONS válaszokat is:
+app.options("*", cors());
 
 /* ============================================================
    In-memory DEV store (MVP-hez). Prod: adatbázis!
